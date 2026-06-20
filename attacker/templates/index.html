@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SSH Brute Force — Attacker Dashboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d0d0d;
+      color: #00ff41;
+      font-family: 'Courier New', monospace;
+      padding: 30px;
+    }
+
+    h1 {
+      font-size: 22px;
+      border-bottom: 1px solid #00ff41;
+      padding-bottom: 10px;
+      margin-bottom: 25px;
+      letter-spacing: 2px;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      gap: 25px;
+    }
+
+    .panel {
+      background: #111;
+      border: 1px solid #00ff4155;
+      border-radius: 6px;
+      padding: 20px;
+    }
+
+    .panel h2 {
+      font-size: 13px;
+      letter-spacing: 2px;
+      color: #00ff41aa;
+      margin-bottom: 16px;
+    }
+
+    label {
+      display: block;
+      font-size: 11px;
+      color: #00ff4188;
+      margin-bottom: 4px;
+      margin-top: 12px;
+      letter-spacing: 1px;
+    }
+
+    input {
+      width: 100%;
+      background: #0d0d0d;
+      border: 1px solid #00ff4155;
+      color: #00ff41;
+      padding: 8px 10px;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      border-radius: 4px;
+      outline: none;
+    }
+
+    input:focus { border-color: #00ff41; }
+
+    .btn {
+      width: 100%;
+      padding: 10px;
+      margin-top: 18px;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      font-weight: bold;
+      letter-spacing: 2px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+
+    .btn:hover { opacity: 0.85; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    #btn-start { background: #00ff41; color: #0d0d0d; }
+    #btn-stop  { background: #ff4141; color: #fff; margin-top: 8px; }
+
+    .progress-bar-wrap {
+      background: #0d0d0d;
+      border: 1px solid #00ff4155;
+      border-radius: 4px;
+      height: 10px;
+      margin-top: 18px;
+      overflow: hidden;
+    }
+
+    #progress-bar {
+      height: 100%;
+      width: 0%;
+      background: #00ff41;
+      transition: width 0.3s;
+    }
+
+    #progress-text {
+      font-size: 11px;
+      color: #00ff4188;
+      margin-top: 6px;
+      text-align: center;
+    }
+
+    #status-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 11px;
+      letter-spacing: 1px;
+      margin-bottom: 14px;
+      background: #1a1a1a;
+      border: 1px solid #00ff4155;
+      color: #00ff4188;
+    }
+
+    #status-badge.running { border-color: #ffaa00; color: #ffaa00; }
+    #status-badge.found   { border-color: #00ff41; color: #00ff41; background: #00ff4122; }
+    #status-badge.stopped { border-color: #ff4141; color: #ff4141; }
+
+    #log-box {
+      background: #0a0a0a;
+      border: 1px solid #00ff4133;
+      border-radius: 4px;
+      height: 420px;
+      overflow-y: auto;
+      padding: 12px;
+      font-size: 12px;
+      line-height: 1.7;
+    }
+
+    .log-failed  { color: #ff6b6b; }
+    .log-success { color: #00ff41; font-weight: bold; font-size: 13px; }
+    .log-info    { color: #aaaaaa; }
+    .log-ping    { display: none; }
+
+    #result-box {
+      margin-top: 16px;
+      padding: 14px;
+      border-radius: 6px;
+      display: none;
+      background: #00ff4111;
+      border: 1px solid #00ff41;
+      font-size: 14px;
+      letter-spacing: 1px;
+    }
+
+    #result-box span { color: #fff; font-weight: bold; }
+  </style>
+</head>
+<body>
+
+<h1>[ SSH BRUTE FORCE — ATTACKER DASHBOARD ]</h1>
+
+<div class="layout">
+
+  <!-- Left Panel: Config -->
+  <div class="panel">
+    <h2>// ATTACK CONFIGURATION</h2>
+
+    <label>TARGET IP</label>
+    <input id="ip" type="text" value="172.22.229.213" />
+
+    <label>SSH PORT</label>
+    <input id="port" type="text" value="22" />
+
+    <label>USERNAME</label>
+    <input id="username" type="text" value="yaseen" />
+
+    <label>WORDLIST PATH</label>
+    <input id="wordlist" type="text" value="/home/kali/wordlist.txt" />
+
+    <label>TIMEOUT (seconds)</label>
+    <input id="timeout" type="text" value="5" />
+
+    <button class="btn" id="btn-start" onclick="startAttack()">▶ START ATTACK</button>
+    <button class="btn" id="btn-stop"  onclick="stopAttack()" disabled>■ STOP</button>
+
+    <div class="progress-bar-wrap">
+      <div id="progress-bar"></div>
+    </div>
+    <div id="progress-text">0 / 0 attempts</div>
+  </div>
+
+  <!-- Right Panel: Live Log -->
+  <div class="panel">
+    <h2>// LIVE ATTACK LOG</h2>
+    <div id="status-badge">IDLE</div>
+    <div id="log-box"></div>
+    <div id="result-box">
+      PASSWORD CRACKED &nbsp;►&nbsp; <span id="result-password"></span>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  let eventSource = null;
+  let pollInterval = null;
+
+  function startAttack() {
+    const data = new FormData();
+    data.append("ip",       document.getElementById("ip").value);
+    data.append("port",     document.getElementById("port").value);
+    data.append("username", document.getElementById("username").value);
+    data.append("wordlist", document.getElementById("wordlist").value);
+    data.append("timeout",  document.getElementById("timeout").value);
+
+    fetch("/start", { method: "POST", body: data })
+      .then(r => r.json())
+      .then(res => {
+        if (res.error) { alert(res.error); return; }
+        setStatus("running");
+        clearLog();
+        document.getElementById("btn-start").disabled = true;
+        document.getElementById("btn-stop").disabled  = false;
+        document.getElementById("result-box").style.display = "none";
+        listenStream();
+        pollProgress();
+      });
+  }
+
+  function stopAttack() {
+    fetch("/stop", { method: "POST" });
+  }
+
+  function listenStream() {
+    if (eventSource) eventSource.close();
+    eventSource = new EventSource("/stream");
+
+    eventSource.onmessage = function(e) {
+      const msg = e.data;
+      if (msg === "PING") return;
+
+      if (msg === "DONE") {
+        eventSource.close();
+        document.getElementById("btn-start").disabled = false;
+        document.getElementById("btn-stop").disabled  = true;
+        clearInterval(pollInterval);
+        checkFinal();
+        return;
+      }
+
+      appendLog(msg);
+    };
+  }
+
+  function appendLog(msg) {
+    const box = document.getElementById("log-box");
+    const div = document.createElement("div");
+
+    if (msg.startsWith("SUCCESS")) {
+      div.className = "log-success";
+    } else if (msg.startsWith("FAILED")) {
+      div.className = "log-failed";
+    } else {
+      div.className = "log-info";
+    }
+
+    div.textContent = msg;
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function clearLog() {
+    document.getElementById("log-box").innerHTML = "";
+  }
+
+  function pollProgress() {
+    pollInterval = setInterval(() => {
+      fetch("/status").then(r => r.json()).then(s => {
+        const pct = s.total > 0 ? (s.progress / s.total * 100) : 0;
+        document.getElementById("progress-bar").style.width = pct + "%";
+        document.getElementById("progress-text").textContent =
+          `${s.progress} / ${s.total} attempts`;
+      });
+    }, 500);
+  }
+
+  function checkFinal() {
+    fetch("/status").then(r => r.json()).then(s => {
+      if (s.found) {
+        setStatus("found");
+        document.getElementById("result-password").textContent = s.found;
+        document.getElementById("result-box").style.display = "block";
+      } else {
+        setStatus("stopped");
+      }
+      document.getElementById("progress-bar").style.width = "100%";
+    });
+  }
+
+  function setStatus(state) {
+    const badge = document.getElementById("status-badge");
+    badge.className = "status-badge " + state;
+    const labels = { running: "RUNNING", found: "PASSWORD FOUND", stopped: "STOPPED", idle: "IDLE" };
+    badge.id = "status-badge";
+    badge.className = state;
+    badge.textContent = labels[state] || state.toUpperCase();
+  }
+</script>
+
+</body>
+</html>

@@ -1,0 +1,26 @@
+# Kali Linux VM files
+kali-linux*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+project-env/
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Database
+*.db
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
