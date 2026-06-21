@@ -190,6 +190,7 @@ From Windows PowerShell:
 ```powershell
 scp shared/crypto_demo.py kali@<kali-ip>:~/crypto_demo.py
 scp attacker/app.py kali@<kali-ip>:~/app.py
+scp attacker/port_scanner.py kali@<kali-ip>:~/port_scanner.py
 scp attacker/wordlists/common_passwords.txt kali@<kali-ip>:~/wordlist.txt
 scp attacker/attack.ipynb kali@<kali-ip>:~/attack.ipynb
 ```
@@ -199,6 +200,7 @@ Then on Kali, organize the files:
 ```bash
 mkdir -p ~/attacker/templates
 mv ~/app.py ~/attacker/
+mv ~/port_scanner.py ~/attacker/
 mv ~/attack.ipynb ~/attacker/
 cp ~/wordlist.txt ~/attacker/wordlist.txt
 ```
@@ -248,7 +250,10 @@ python3 app.py
 
 Open in Windows browser: `http://<kali-ip>:5000`
 
-Configure the target IP, username, and wordlist path, then click **START ATTACK**.
+The dashboard has two tabs:
+
+- **SSH BRUTE FORCE** — configure target IP, username, and wordlist path, then click **START ATTACK**
+- **PORT SCANNER** — configure target IP and port range (`common`, `1-1024`, or `1-65535`), then click **START SCAN**
 
 ---
 
@@ -277,9 +282,10 @@ You will see real-time SSH authentication failure alerts from the attacker IP.
 cybersecurity/
 ├── attacker/
 │   ├── app.py                        # Flask attacker GUI
+│   ├── port_scanner.py               # Port scanner module
 │   ├── attack.ipynb                  # Jupyter notebook
 │   ├── templates/
-│   │   └── index.html                # Dashboard UI
+│   │   └── index.html                # Dashboard UI (two tabs)
 │   └── wordlists/
 │       └── common_passwords.txt      # Password wordlist
 ├── shared/
@@ -303,3 +309,5 @@ cybersecurity/
 | Wazuh install fails (RAM check) | Use `-i` flag: `sudo bash wazuh-install.sh -a -i` |
 | Wordlist not found in notebook | Use absolute path: `/home/kali/wordlist.txt` |
 | Wazuh dashboard not loading | Wait 2–3 minutes after boot — indexer takes time to start |
+| Port scanner results table empty | Scroll down in the browser — table renders after scan completes |
+| Port scan takes too long | Use `common` or `1-1024` instead of `1-65535` for a quicker scan |

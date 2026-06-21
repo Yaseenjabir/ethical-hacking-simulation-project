@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>SSH Brute Force — Attacker Dashboard</title>
+  <title>Attacker Dashboard</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -152,13 +152,38 @@
     }
 
     #result-box span { color: #fff; font-weight: bold; }
+
+    .tab-btn {
+      background: #111;
+      border: 1px solid #00ff4155;
+      color: #00ff4188;
+      padding: 8px 20px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      letter-spacing: 1px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .tab-btn.active {
+      border-color: #00ff41;
+      color: #00ff41;
+      background: #00ff4111;
+    }
   </style>
 </head>
 <body>
 
-<h1>[ SSH BRUTE FORCE — ATTACKER DASHBOARD ]</h1>
+<h1>[ ATTACKER DASHBOARD ]</h1>
 
-<div class="layout">
+<!-- Tabs -->
+<div style="margin-bottom: 20px;">
+  <button class="tab-btn active" onclick="showTab('brute')">▶ SSH BRUTE FORCE</button>
+  <button class="tab-btn" onclick="showTab('scan')" style="margin-left:10px;">▶ PORT SCANNER</button>
+</div>
+
+<!-- Brute Force Tab -->
+<div id="tab-brute" class="layout">
 
   <!-- Left Panel: Config -->
   <div class="panel">
@@ -200,7 +225,133 @@
 
 </div>
 
+<!-- Port Scanner Tab -->
+<div id="tab-scan" class="layout" style="display:none;">
+
+  <!-- Left Panel -->
+  <div class="panel">
+    <h2>// SCAN CONFIGURATION</h2>
+
+    <label>TARGET IP</label>
+    <input id="scan-ip" type="text" value="172.22.229.213" />
+
+    <label>PORTS (e.g. common, 1-1024, 22,80,443)</label>
+    <input id="scan-ports" type="text" value="1-65535" />
+
+    <label>TIMEOUT (seconds)</label>
+    <input id="scan-timeout" type="text" value="1" />
+
+    <button class="btn" id="btn-scan-start" onclick="startScan()" style="background:#00ff41;color:#0d0d0d;">▶ START SCAN</button>
+    <button class="btn" id="btn-scan-stop" onclick="stopScan()" style="background:#ff4141;color:#fff;margin-top:8px;" disabled>■ STOP</button>
+  </div>
+
+  <!-- Right Panel -->
+  <div class="panel">
+    <h2>// SCAN RESULTS</h2>
+    <div id="scan-status-badge" style="display:inline-block;padding:4px 12px;border-radius:20px;font-size:11px;letter-spacing:1px;margin-bottom:14px;background:#1a1a1a;border:1px solid #00ff4155;color:#00ff4188;">IDLE</div>
+    <div id="scan-log-box" style="background:#0a0a0a;border:1px solid #00ff4133;border-radius:4px;height:200px;overflow-y:auto;padding:12px;font-size:12px;line-height:1.7;margin-bottom:16px;"></div>
+
+    <h2 style="margin-bottom:10px;">// OPEN PORTS</h2>
+    <table id="scan-table" style="width:100%;border-collapse:collapse;font-size:12px;">
+      <thead>
+        <tr style="color:#00ff4188;border-bottom:1px solid #00ff4133;">
+          <th style="text-align:left;padding:6px;">PORT</th>
+          <th style="text-align:left;padding:6px;">SERVICE</th>
+          <th style="text-align:left;padding:6px;">BANNER</th>
+        </tr>
+      </thead>
+      <tbody id="scan-table-body"></tbody>
+    </table>
+  </div>
+</div>
+
 <script>
+  // Tab switching
+  function showTab(name) {
+    document.getElementById("tab-brute").style.display = name === "brute" ? "grid" : "none";
+    document.getElementById("tab-scan").style.display  = name === "scan"  ? "grid" : "none";
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+    event.target.classList.add("active");
+  }
+
+  // Port scanner
+  let scanSource = null;
+
+  function startScan() {
+    const data = new FormData();
+    data.append("ip",      document.getElementById("scan-ip").value);
+    data.append("ports",   document.getElementById("scan-ports").value);
+    data.append("timeout", document.getElementById("scan-timeout").value);
+
+    fetch("/scan/start", { method: "POST", body: data })
+      .then(r => r.json())
+      .then(res => {
+        if (res.error) { alert(res.error); return; }
+        document.getElementById("scan-log-box").innerHTML = "";
+        document.getElementById("scan-table-body").innerHTML = "";
+        document.getElementById("btn-scan-start").disabled = true;
+        document.getElementById("btn-scan-stop").disabled  = false;
+        document.getElementById("scan-status-badge").textContent = "SCANNING";
+        document.getElementById("scan-status-badge").style.color = "#ffaa00";
+        listenScan();
+      });
+  }
+
+  function stopScan() {
+    fetch("/scan/stop", { method: "POST" });
+  }
+
+  function listenScan() {
+    if (scanSource) scanSource.close();
+    scanSource = new EventSource("/scan/stream");
+
+    scanSource.onmessage = function(e) {
+      const msg = e.data;
+      if (msg === "PING") return;
+
+      if (msg === "DONE") {
+        scanSource.close();
+        document.getElementById("btn-scan-start").disabled = false;
+        document.getElementById("btn-scan-stop").disabled  = true;
+        document.getElementById("scan-status-badge").textContent = "COMPLETE";
+        document.getElementById("scan-status-badge").style.color = "#00ff41";
+        loadResults();
+        return;
+      }
+
+      if (msg.startsWith("OPEN")) {
+        const div = document.createElement("div");
+        div.style.color = "#00ff41";
+        div.textContent = msg;
+        document.getElementById("scan-log-box").appendChild(div);
+      } else if (msg.startsWith("INFO")) {
+        const div = document.createElement("div");
+        div.style.color = "#aaaaaa";
+        div.textContent = msg;
+        document.getElementById("scan-log-box").appendChild(div);
+      }
+
+      document.getElementById("scan-log-box").scrollTop = 9999;
+    };
+  }
+
+  function loadResults() {
+    fetch("/scan/results").then(r => r.json()).then(data => {
+      const tbody = document.getElementById("scan-table-body");
+      tbody.innerHTML = "";
+      data.results.forEach(r => {
+        const tr = document.createElement("tr");
+        tr.style.borderBottom = "1px solid #00ff4122";
+        tr.innerHTML = `
+          <td style="padding:6px;color:#00ff41;">${r.port}</td>
+          <td style="padding:6px;color:#ffaa00;">${r.service}</td>
+          <td style="padding:6px;color:#aaaaaa;">${r.banner || "-"}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    });
+  }
+
   let eventSource = null;
   let pollInterval = null;
 

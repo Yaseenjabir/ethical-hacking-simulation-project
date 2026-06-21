@@ -5,6 +5,7 @@ import socket
 import queue
 import paramiko
 from flask import Flask, render_template, request, Response, jsonify
+from port_scanner import run_scan, parse_port_range
 
 sys.path.append('../shared')
 
@@ -143,6 +144,79 @@ def status():
         "found":    attack_state["found"],
         "progress": attack_state["progress"],
         "total":    attack_state["total"],
+    })
+
+
+# ─── Port Scanner State ───────────────────────────────────────
+scan_state = {
+    "running": False,
+    "results": [],
+}
+scan_queue = queue.Queue()
+scan_stop_event = threading.Event()
+
+
+def run_scan_thread(ip, ports, timeout):
+    scan_state["running"] = True
+    scan_state["results"] = []
+    scan_stop_event.clear()
+
+    results = run_scan(
+        ip=ip,
+        ports=ports,
+        timeout=timeout,
+        max_threads=50,
+        log_queue=scan_queue,
+        stop_event=scan_stop_event,
+    )
+    scan_state["results"] = results
+    scan_state["running"] = False
+
+
+@app.route("/scan/start", methods=["POST"])
+def scan_start():
+    if scan_state["running"]:
+        return jsonify({"error": "Scan already running"}), 400
+
+    data    = request.form
+    ip      = data.get("ip", "172.22.229.213")
+    ports   = parse_port_range(data.get("ports", "common"))
+    timeout = float(data.get("timeout", 1))
+
+    t = threading.Thread(
+        target=run_scan_thread,
+        args=(ip, ports, timeout),
+        daemon=True
+    )
+    t.start()
+    return jsonify({"status": "started", "total_ports": len(ports)})
+
+
+@app.route("/scan/stop", methods=["POST"])
+def scan_stop():
+    scan_stop_event.set()
+    return jsonify({"status": "stopping"})
+
+
+@app.route("/scan/stream")
+def scan_stream():
+    def event_generator():
+        while True:
+            try:
+                msg = scan_queue.get(timeout=30)
+                yield f"data: {msg}\n\n"
+                if msg == "DONE":
+                    break
+            except queue.Empty:
+                yield "data: PING\n\n"
+    return Response(event_generator(), mimetype="text/event-stream")
+
+
+@app.route("/scan/results")
+def scan_results():
+    return jsonify({
+        "running": scan_state["running"],
+        "results": scan_state["results"],
     })
 
 
