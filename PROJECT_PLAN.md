@@ -4,8 +4,8 @@
 
 A Python-based ethical hacking simulation with two sides:
 
-- **Attacker:** SSH brute force + port scanner launched from Kali Linux via a Flask GUI and Jupyter Notebook
-- **Defender:** Wazuh SIEM/IDS running on the victim Ubuntu VM, detecting attacks and mapping them to MITRE ATT&CK
+- **Attacker:** Four attack modules launched from Kali Linux via a Flask GUI and Jupyter Notebook
+- **Defender:** Wazuh SIEM/IDS running on the victim Ubuntu VM, detecting all attacks and mapping them to MITRE ATT&CK
 
 ---
 
@@ -16,6 +16,7 @@ A Python-based ethical hacking simulation with two sides:
 | SSH Brute Force | Python paramiko | T1110.001 — Password Guessing |
 | Port Scanning | Python socket + threading | T1046 — Network Service Discovery |
 | Web Login Brute Force | Python requests + PHP Apache | T1110.001 — Password Guessing (HTTP) |
+| SQL Injection | Python requests + MySQL PHP app | T1190 — Exploit Public-Facing Application |
 
 ---
 
@@ -25,9 +26,10 @@ A Python-based ethical hacking simulation with two sides:
 cybersecurity/
 │
 ├── attacker/
-│   ├── app.py                    # Flask GUI — three-tab attacker dashboard
+│   ├── app.py                    # Flask GUI — four-tab attacker dashboard
 │   ├── port_scanner.py           # Port scanner module (TCP Connect, threading, banner grab)
 │   ├── web_bruteforce.py         # Web login brute force (HTTP POST, requests library)
+│   ├── sqli_attack.py            # SQL injection (login bypass + UNION extraction)
 │   ├── attack.ipynb              # Jupyter Notebook — step-by-step brute force
 │   ├── templates/
 │   │   └── index.html            # Attacker dashboard UI (dark hacker theme, three tabs)
@@ -118,19 +120,35 @@ cybersecurity/
       - Sequential attempts (no threading — avoids session corruption)
       - MITRE ATT&CK: T1110.001 — Brute Force: Password Guessing (HTTP)
 
-[x] attacker/app.py (Flask GUI — web brute force routes)
-      - POST /web/start  — launches background web attack thread
-      - POST /web/stop   — signals stop event
-      - GET  /web/stream — SSE live log stream
-      - GET  /web/status — found password
+[x] attacker/sqli_attack.py
+      - Phase 0: injection probe (single quote test, error detection)
+      - Phase 1: login bypass (6 payloads — OR-based, comment-based)
+      - Phase 2: UNION extraction (dump users, passwords, emails, DB version, tables)
+      - Uses # as MySQL comment (more reliable than -- in HTTP context)
+      - Parses HTML table rows from response to display extracted data
+      - MITRE ATT&CK: T1190 — Exploit Public-Facing Application
+
+[x] attacker/app.py (Flask GUI — web brute force + SQL injection routes)
+      - POST /web/start   — launches background web attack thread
+      - POST /web/stop    — signals stop event
+      - GET  /web/stream  — SSE live log stream
+      - GET  /web/status  — found password
+      - POST /sqli/start  — launches background SQL injection thread
+      - POST /sqli/stop   — signals stop event
+      - GET  /sqli/stream — SSE live log stream
+      - GET  /sqli/status — bypass payload and extracted data
 
 [x] attacker/templates/index.html
-      - Three-tab dashboard: SSH BRUTE FORCE | PORT SCANNER | WEB BRUTE FORCE
-      - Brute force tab: config panel, live log, progress bar, result banner
-      - Port scanner tab: config panel, live log, open ports table
-      - Web brute force tab: URL/username/wordlist config, live log, result banner
+      - Four-tab dashboard: SSH BRUTE FORCE | PORT SCANNER | WEB BRUTE FORCE | SQL INJECTION
+      - SQL injection tab: login URL + search URL config, live log, extracted data table
       - Dark hacker theme (green on black, Courier New)
       - Default port range: 1-65535
+
+[x] victim-webapp/ (PHP source files for anyone cloning the repo)
+      - login_basic.php  — hardcoded creds, used for web brute force
+      - login_sqli.php   — MySQL login, vulnerable to SQL injection
+      - search.php       — vulnerable search, used for UNION extraction
+      - dashboard.php    — protected page shown after successful login
 ```
 
 ### Phase 4 — Defender Side
@@ -146,6 +164,11 @@ cybersecurity/
 [x] Custom Wazuh rule written in local_rules.xml:
       - Rule 100002 (level 3): fires on every POST to /login.php
       - Rule 100003 (level 10): fires after 5 hits from same IP in 30 seconds
+[x] SQL injection detected automatically — Wazuh built-in rules fired:
+      - Rule 31103 (level 7): SQL injection attempt (OR/UNION keywords in request)
+      - Rule 31164 (level 6): SQL injection pattern matched
+      - Rule 31106 (level 6): web attack returned 200 success
+      - Rule 31122 (level 5): 500 error during probe phase
 [x] MITRE ATT&CK auto-mapped:
       - Valid Accounts
       - Password Guessing
@@ -164,11 +187,13 @@ cybersecurity/
 [x] Banner grabbing returned SSH version and HTTP status codes
 [x] Web brute force ran against PHP login page — password cracked in 21 attempts
 [x] Wazuh detected web attack — rule 100003 fired at level 10
-[x] Wazuh dashboard showed all three attacks in real time
+[x] SQL injection ran — login bypassed with OR payload, UNION extraction dumped DB
+[x] Wazuh detected SQL injection automatically — rules 31103 and 31164 fired
+[x] Wazuh dashboard showed all four attacks in real time
 [x] MITRE ATT&CK dashboard showed 5 techniques
 [x] auth.log captured all SSH attempts with attacker IP
-[x] Apache access.log captured all web login attempts with attacker IP
-[x] All three attacks confirmed detected and logged
+[x] Apache access.log captured all web and SQL injection attempts with attacker IP
+[x] All four attacks confirmed detected and logged
 ```
 
 ### Phase 6 — Report and Documentation
@@ -212,11 +237,12 @@ cybersecurity/
 | --- | --- |
 | SSH brute force | Python + paramiko |
 | Web brute force | Python + requests |
+| SQL injection | Python + requests (login bypass + UNION) |
 | Port scanner | Python socket + threading |
-| Attacker GUI | Flask + SSE (Server-Sent Events) |
+| Attacker GUI | Flask + SSE (Server-Sent Events) — four tabs |
 | Cryptography demo | Python hashlib + bcrypt |
 | Notebook walkthrough | Jupyter (.ipynb) |
-| Vulnerable web app | PHP + Apache (port 8888) |
+| Vulnerable web app | PHP + Apache + MySQL (port 8888) |
 | SIEM and IDS | Wazuh (Manager + Indexer + Dashboard) |
 | Custom Wazuh rules | local_rules.xml (rules 100002, 100003) |
 | Victim SSH service | OpenSSH on Ubuntu 22.04 |
@@ -232,11 +258,14 @@ cybersecurity/
 | SSH brute force duration | ~90 seconds |
 | Web passwords tried before crack | 21 |
 | Web brute force duration | ~1 second |
+| SQL injection login bypass payloads | 6 |
+| SQL injection UNION payloads | 6 |
 | Ports scanned | 65,535 |
 | Open ports found | 9 |
 | Port scan duration | ~3 minutes |
 | Wazuh MITRE techniques detected | 5 |
 | Custom Wazuh rules written | 2 (100002, 100003) |
+| Wazuh built-in rules triggered | 31103, 31106, 31122, 31164 (SQL injection) |
 | Bcrypt vs MD5 speed ratio | 127,330x slower |
 
 ---

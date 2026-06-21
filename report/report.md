@@ -15,9 +15,10 @@
 4. [Attacker Side — SSH Brute Force](#4-attacker-side--ssh-brute-force)
 5. [Port Scanner](#5-port-scanner)
 6. [Web Login Brute Force](#6-web-login-brute-force)
-7. [Defender Side — SOC and IDS](#7-defender-side--soc-and-ids)
-8. [Integration and Testing](#8-integration-and-testing)
-9. [Conclusion and Recommendations](#9-conclusion-and-recommendations)
+7. [SQL Injection](#7-sql-injection)
+8. [Defender Side — SOC and IDS](#8-defender-side--soc-and-ids)
+9. [Integration and Testing](#9-integration-and-testing)
+10. [Conclusion and Recommendations](#10-conclusion-and-recommendations)
 
 ---
 
@@ -39,8 +40,9 @@ The simulation covers two sides:
 | SSH Brute Force | Systematic password guessing via paramiko | T1110.001 |
 | Port Scanning | TCP Connect scan across all 65,535 ports | T1046 |
 | Web Login Brute Force | HTTP POST form attacks via requests library | T1110.001 |
+| SQL Injection | Login bypass and UNION data extraction via requests | T1190 |
 
-These attacks represent the reconnaissance and initial access phases of a real attack — and are all detectable by a SIEM.
+These attacks represent the reconnaissance, initial access, and exploitation phases of a real attack — and are all detectable by a SIEM.
 
 ### 1.3 Ethical Disclaimer
 
@@ -442,9 +444,79 @@ Rule 100002 fires on every POST to `/login.php`. Rule 100003 fires at **level 10
 
 ---
 
-## 7. Defender Side — SOC and IDS
+## 7. SQL Injection
 
-### 6.1 Wazuh Overview
+### 7.1 What is SQL Injection
+
+SQL injection is a vulnerability where user input is inserted directly into a SQL query without sanitization. The attacker supplies SQL syntax as input, changing the logic of the query.
+
+The vulnerable PHP code on the victim:
+
+```php
+$query = "SELECT * FROM users WHERE username='$username' AND password='$password'";
+```
+
+When `$username = admin' OR '1'='1 #`, the query becomes:
+
+```sql
+SELECT * FROM users WHERE username='admin' OR '1'='1' #' AND password='...'
+```
+
+The `OR '1'='1'` is always true. The `#` comments out the rest. The WHERE clause matches every row — login succeeds without knowing any password.
+
+### 7.2 Attack Phases
+
+The SQL injection module ran three phases automatically:
+
+**Phase 0 — Probe:** Sent a single quote `'` to detect SQL errors in the response (error-based detection).
+
+**Phase 1 — Login Bypass (6 payloads):**
+
+| Payload | Technique |
+| --- | --- |
+| `' OR '1'='1' #` | Always-true OR condition |
+| `admin' #` | Comment out password check |
+| `' OR 1=1 #` | Numeric always-true |
+| `admin' OR '1'='1` | No comment needed — string closes naturally |
+| `' OR 'x'='x' #` | String always-true variant |
+| `" OR "1"="1" #` | Double-quote variant |
+
+**Phase 2 — UNION Extraction (6 payloads):** Once injection was confirmed, UNION SELECT payloads dumped data from the `users` table via the vulnerable `search.php` page:
+
+```sql
+' UNION SELECT username,password,role FROM users #
+```
+
+This appends a second SELECT to the original query and returns its results alongside the page output — leaking all usernames, passwords, emails, roles, and even the MySQL server version.
+
+### 7.3 Wazuh Detection — Built-in Rules
+
+SQL injection payloads contain distinctive SQL keywords. Wazuh's built-in web rules matched them from the Apache access log automatically — **no custom rule was needed**:
+
+| Rule ID | Level | Description |
+| --- | --- | --- |
+| 31103 | 7 | SQL injection attempt (OR/UNION keywords detected) |
+| 31164 | 6 | SQL injection pattern matched |
+| 31106 | 6 | Web attack returned 200 success |
+| 31122 | 5 | 500 error during probe phase |
+
+This contrasts with web brute force — which requires a custom frequency rule because the individual requests look identical to normal login attempts.
+
+### 7.4 Why SQL Injection Works
+
+The root cause is **string concatenation** instead of **parameterized queries**:
+
+| Vulnerable (PHP) | Secure (PHP) |
+| --- | --- |
+| `"SELECT * WHERE user='$input'"` | `$stmt = $pdo->prepare("SELECT * WHERE user=?"); $stmt->execute([$input]);` |
+
+Parameterized queries send the SQL structure and the data separately — the database never interprets user input as SQL syntax.
+
+---
+
+## 8. Defender Side — SOC and IDS
+
+### 8.1 Wazuh Overview
 
 Wazuh is an open-source Security Information and Event Management (SIEM) platform. The full stack was installed on the Ubuntu VM:
 
@@ -454,7 +526,7 @@ Wazuh is an open-source Security Information and Event Management (SIEM) platfor
 | Wazuh Indexer | Stores and indexes alerts | 1.2 GB |
 | Wazuh Dashboard | Web-based SOC UI | 170 MB |
 
-### 6.2 How Wazuh Detected the SSH Brute Force
+### 8.2 How Wazuh Detected the SSH Brute Force
 
 Every SSH login attempt generates entries in `/var/log/auth.log` on Ubuntu. Wazuh's log collector monitors this file in real time and matches entries against its rule set.
 
@@ -466,11 +538,11 @@ Every SSH login attempt generates entries in `/var/log/auth.log` on Ubuntu. Wazu
 | 5503 | PAM: User login failed | 5 |
 | 5501 | PAM: Login session opened | 3 |
 
-### 6.3 How Wazuh Detected the Port Scan
+### 8.3 How Wazuh Detected the Port Scan
 
 The port scanner connected to multiple services in rapid succession. Wazuh detected this anomalous behavior and mapped it to the Remote Services technique in the MITRE ATT&CK framework.
 
-### 6.4 MITRE ATT&CK Dashboard
+### 8.4 MITRE ATT&CK Dashboard
 
 After running both attacks, the Wazuh MITRE ATT&CK dashboard showed five techniques automatically detected:
 
@@ -482,7 +554,7 @@ After running both attacks, the Wazuh MITRE ATT&CK dashboard showed five techniq
 | Sudo and Sudo Caching | sudo commands run on Ubuntu |
 | Remote Services | Port scanner connecting to multiple services |
 
-### 6.5 Evidence from auth.log
+### 8.5 Evidence from auth.log
 
 ```text
 Jun 21 10:20:38 sshd: Failed password for yaseen from 172.22.225.120 port 46136
@@ -495,9 +567,9 @@ Ubuntu logged all 20 failed attempts and the final successful login from Kali's 
 
 ---
 
-## 8. Integration and Testing
+## 9. Integration and Testing
 
-### 7.1 Full SSH Brute Force Flow
+### 9.1 Full SSH Brute Force Flow
 
 ```text
 1.  Attacker opens Flask GUI at http://172.22.225.120:5000
@@ -513,7 +585,7 @@ Ubuntu logged all 20 failed attempts and the final successful login from Kali's 
 11. Wazuh dashboard shows spike in authentication failure alerts
 ```
 
-### 7.2 Full Port Scan Flow
+### 9.2 Full Port Scan Flow
 
 ```text
 1.  Attacker switches to PORT SCANNER tab in Flask GUI
@@ -527,7 +599,7 @@ Ubuntu logged all 20 failed attempts and the final successful login from Kali's 
 9.  Remote Services technique appears on MITRE ATT&CK dashboard
 ```
 
-### 7.3 Test Results
+### 9.3 Test Results
 
 | Test | Result |
 | --- | --- |
@@ -546,9 +618,9 @@ Ubuntu logged all 20 failed attempts and the final successful login from Kali's 
 
 ---
 
-## 9. Conclusion and Recommendations
+## 10. Conclusion and Recommendations
 
-### 8.1 Conclusion
+### 10.1 Conclusion
 
 This project successfully simulated a complete attack cycle — reconnaissance through initial access — in a controlled environment:
 
@@ -558,7 +630,7 @@ This project successfully simulated a complete attack cycle — reconnaissance t
 - The **cryptography module** proved that algorithm choice is critical — bcrypt is 127,330x slower than MD5 per attempt
 - The **defender side** showed how a real SIEM (Wazuh) detects all three attacks — including a custom rule written from scratch to detect web brute force — and maps them to MITRE ATT&CK in real time
 
-### 8.2 Defense Recommendations
+### 10.2 Defense Recommendations
 
 | Recommendation | Impact |
 | --- | --- |
@@ -571,7 +643,7 @@ This project successfully simulated a complete attack cycle — reconnaissance t
 | Monitor auth.log continuously with IDS | Enables rapid threat detection |
 | Suppress service version banners | Prevents attackers from targeting specific CVEs |
 
-### 8.3 Key Takeaway
+### 10.3 Key Takeaway
 
 > A password like `123123` was cracked in under 2 minutes from a 21-entry wordlist.
 > The port scan mapped the entire attack surface in under 3 minutes.
