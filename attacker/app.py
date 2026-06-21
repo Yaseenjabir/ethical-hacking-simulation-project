@@ -7,6 +7,7 @@ import paramiko
 from flask import Flask, render_template, request, Response, jsonify
 from port_scanner import run_scan, parse_port_range
 from web_bruteforce import run_web_attack
+from sqli_attack import run_sqli_attack
 
 sys.path.append('../shared')
 
@@ -299,6 +300,73 @@ def web_status():
         "found":    web_state["found"],
         "progress": web_state["progress"],
         "total":    web_state["total"],
+    })
+
+
+# ─── SQL Injection State ──────────────────────────────────────
+sqli_state = {
+    "running":        False,
+    "bypass_payload": None,
+    "extracted":      [],
+}
+sqli_queue      = queue.Queue()
+sqli_stop_event = threading.Event()
+
+
+def run_sqli_thread(login_url, search_url):
+    sqli_state["running"]        = True
+    sqli_state["bypass_payload"] = None
+    sqli_state["extracted"]      = []
+    sqli_stop_event.clear()
+
+    result = run_sqli_attack(login_url, search_url, sqli_queue, sqli_stop_event)
+    sqli_state["bypass_payload"] = result.get("bypass_payload")
+    sqli_state["extracted"]      = result.get("extracted", [])
+    sqli_state["running"]        = False
+
+
+@app.route("/sqli/start", methods=["POST"])
+def sqli_start():
+    if sqli_state["running"]:
+        return jsonify({"error": "Attack already running"}), 400
+    data       = request.form
+    login_url  = data.get("login_url",  "http://172.22.229.213:8888/login.php")
+    search_url = data.get("search_url", "http://172.22.229.213:8888/search.php")
+    t = threading.Thread(
+        target=run_sqli_thread,
+        args=(login_url, search_url),
+        daemon=True
+    )
+    t.start()
+    return jsonify({"status": "started"})
+
+
+@app.route("/sqli/stop", methods=["POST"])
+def sqli_stop():
+    sqli_stop_event.set()
+    return jsonify({"status": "stopping"})
+
+
+@app.route("/sqli/stream")
+def sqli_stream():
+    def event_generator():
+        while True:
+            try:
+                msg = sqli_queue.get(timeout=30)
+                yield f"data: {msg}\n\n"
+                if msg == "DONE":
+                    break
+            except queue.Empty:
+                yield "data: PING\n\n"
+    return Response(event_generator(), mimetype="text/event-stream")
+
+
+@app.route("/sqli/status")
+def sqli_status():
+    return jsonify({
+        "running":        sqli_state["running"],
+        "bypass_payload": sqli_state["bypass_payload"],
+        "extracted":      sqli_state["extracted"],
     })
 
 

@@ -22,7 +22,7 @@
  */
 session_start();
 
-$db = mysqli_connect("localhost", "root", "", "webapp");
+$db = mysqli_connect("localhost", "webapp", "webapp123", "webapp");
 
 $error = "";
 

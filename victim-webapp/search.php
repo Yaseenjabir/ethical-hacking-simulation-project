@@ -4,7 +4,7 @@
  * Displays the raw SQL query so the attacker can see what is happening
  * Vulnerable to: SQL Injection (T1190) — UNION extraction, boolean blind
  */
-$db = mysqli_connect("localhost", "root", "", "webapp");
+$db = mysqli_connect("localhost", "webapp", "webapp123", "webapp");
 
 $results     = [];
 $query_shown = "";
