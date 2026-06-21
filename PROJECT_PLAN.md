@@ -15,6 +15,7 @@ A Python-based ethical hacking simulation with two sides:
 | --- | --- | --- |
 | SSH Brute Force | Python paramiko | T1110.001 — Password Guessing |
 | Port Scanning | Python socket + threading | T1046 — Network Service Discovery |
+| Web Login Brute Force | Python requests + PHP Apache | T1110.001 — Password Guessing (HTTP) |
 
 ---
 
@@ -24,11 +25,12 @@ A Python-based ethical hacking simulation with two sides:
 cybersecurity/
 │
 ├── attacker/
-│   ├── app.py                    # Flask GUI — two-tab attacker dashboard
+│   ├── app.py                    # Flask GUI — three-tab attacker dashboard
 │   ├── port_scanner.py           # Port scanner module (TCP Connect, threading, banner grab)
+│   ├── web_bruteforce.py         # Web login brute force (HTTP POST, requests library)
 │   ├── attack.ipynb              # Jupyter Notebook — step-by-step brute force
 │   ├── templates/
-│   │   └── index.html            # Attacker dashboard UI (dark hacker theme)
+│   │   └── index.html            # Attacker dashboard UI (dark hacker theme, three tabs)
 │   └── wordlists/
 │       └── common_passwords.txt  # 21-password wordlist (includes target password)
 │
@@ -109,10 +111,24 @@ cybersecurity/
       - GET  /scan/stream  — SSE live scan log
       - GET  /scan/results — returns open ports as JSON
 
+[x] attacker/web_bruteforce.py
+      - HTTP POST login form brute force using requests library
+      - Detects success via 302 redirect vs 200 failure response
+      - allow_redirects=False to distinguish success from failure
+      - Sequential attempts (no threading — avoids session corruption)
+      - MITRE ATT&CK: T1110.001 — Brute Force: Password Guessing (HTTP)
+
+[x] attacker/app.py (Flask GUI — web brute force routes)
+      - POST /web/start  — launches background web attack thread
+      - POST /web/stop   — signals stop event
+      - GET  /web/stream — SSE live log stream
+      - GET  /web/status — found password
+
 [x] attacker/templates/index.html
-      - Two-tab dashboard: SSH BRUTE FORCE | PORT SCANNER
+      - Three-tab dashboard: SSH BRUTE FORCE | PORT SCANNER | WEB BRUTE FORCE
       - Brute force tab: config panel, live log, progress bar, result banner
       - Port scanner tab: config panel, live log, open ports table
+      - Web brute force tab: URL/username/wordlist config, live log, result banner
       - Dark hacker theme (green on black, Courier New)
       - Default port range: 1-65535
 ```
@@ -125,6 +141,11 @@ cybersecurity/
 [x] Dashboard accessible at https://172.22.229.213
 [x] SSH brute force detected — rules 5760, 5503, 5501 triggered
 [x] Port scan detected — Remote Services technique flagged
+[x] Web brute force detected — custom rules 100002 + 100003 written and deployed
+[x] Apache log monitoring added to ossec.conf
+[x] Custom Wazuh rule written in local_rules.xml:
+      - Rule 100002 (level 3): fires on every POST to /login.php
+      - Rule 100003 (level 10): fires after 5 hits from same IP in 30 seconds
 [x] MITRE ATT&CK auto-mapped:
       - Valid Accounts
       - Password Guessing
@@ -141,26 +162,30 @@ cybersecurity/
 [x] Flask GUI showed live attack log and PASSWORD CRACKED banner
 [x] Port scan ran across all 65,535 ports — 9 open ports found
 [x] Banner grabbing returned SSH version and HTTP status codes
-[x] Wazuh dashboard showed both attacks in real time
+[x] Web brute force ran against PHP login page — password cracked in 21 attempts
+[x] Wazuh detected web attack — rule 100003 fired at level 10
+[x] Wazuh dashboard showed all three attacks in real time
 [x] MITRE ATT&CK dashboard showed 5 techniques
-[x] auth.log captured all 20 failed and 1 successful SSH attempt
-[x] Both attacks confirmed detected and logged with attacker IP
+[x] auth.log captured all SSH attempts with attacker IP
+[x] Apache access.log captured all web login attempts with attacker IP
+[x] All three attacks confirmed detected and logged
 ```
 
 ### Phase 6 — Report and Documentation
 
 ```text
-[x] report/report.md — 8-section report
+[x] report/report.md — 9-section report
       Section 1: Introduction
       Section 2: Environment Setup
       Section 3: Cryptography Module
       Section 4: Attacker Side — SSH Brute Force
       Section 5: Port Scanner
-      Section 6: Defender Side — SOC and IDS
-      Section 7: Integration and Testing
-      Section 8: Conclusion and Recommendations
+      Section 6: Web Brute Force
+      Section 7: Defender Side — SOC and IDS
+      Section 8: Integration and Testing
+      Section 9: Conclusion and Recommendations
 
-[x] SETUP.md — full local setup guide (11 steps)
+[x] SETUP.md — full local setup guide
 [x] .gitignore — excludes VM files, venvs, pycache, logs
 [x] Git repository initialized and pushed to GitHub
 [x] PROJECT_PLAN.md — updated to reflect actual build
@@ -186,12 +211,15 @@ cybersecurity/
 | Component | Technology |
 | --- | --- |
 | SSH brute force | Python + paramiko |
+| Web brute force | Python + requests |
 | Port scanner | Python socket + threading |
 | Attacker GUI | Flask + SSE (Server-Sent Events) |
 | Cryptography demo | Python hashlib + bcrypt |
 | Notebook walkthrough | Jupyter (.ipynb) |
+| Vulnerable web app | PHP + Apache (port 8888) |
 | SIEM and IDS | Wazuh (Manager + Indexer + Dashboard) |
-| Victim service | OpenSSH on Ubuntu 22.04 |
+| Custom Wazuh rules | local_rules.xml (rules 100002, 100003) |
+| Victim SSH service | OpenSSH on Ubuntu 22.04 |
 | Hypervisor | Windows Hyper-V |
 
 ---
@@ -200,12 +228,15 @@ cybersecurity/
 
 | Metric | Value |
 | --- | --- |
-| Passwords tried before crack | 21 |
-| Brute force duration | ~90 seconds |
+| SSH passwords tried before crack | 21 |
+| SSH brute force duration | ~90 seconds |
+| Web passwords tried before crack | 21 |
+| Web brute force duration | ~1 second |
 | Ports scanned | 65,535 |
 | Open ports found | 9 |
 | Port scan duration | ~3 minutes |
 | Wazuh MITRE techniques detected | 5 |
+| Custom Wazuh rules written | 2 (100002, 100003) |
 | Bcrypt vs MD5 speed ratio | 127,330x slower |
 
 ---

@@ -6,6 +6,7 @@ import queue
 import paramiko
 from flask import Flask, render_template, request, Response, jsonify
 from port_scanner import run_scan, parse_port_range
+from web_bruteforce import run_web_attack
 
 sys.path.append('../shared')
 
@@ -217,6 +218,87 @@ def scan_results():
     return jsonify({
         "running": scan_state["running"],
         "results": scan_state["results"],
+    })
+
+
+# ─── Web Brute Force State ────────────────────────────────────
+web_state = {
+    "running": False,
+    "found":   None,
+    "progress": 0,
+    "total":   0,
+}
+web_queue     = queue.Queue()
+web_stop_event = threading.Event()
+
+
+def run_web_thread(url, username, wordlist, timeout):
+    web_state["running"]  = True
+    web_state["found"]    = None
+    web_state["progress"] = 0
+    web_state["total"]    = 0
+    web_stop_event.clear()
+
+    try:
+        with open(wordlist, "r") as f:
+            passwords = [l.strip() for l in f if l.strip()]
+        web_state["total"] = len(passwords)
+    except Exception as e:
+        web_queue.put(f"ERROR: {e}")
+        web_queue.put("DONE")
+        web_state["running"] = False
+        return
+
+    result = run_web_attack(url, username, wordlist, timeout, web_queue, web_stop_event)
+    web_state["found"]   = result.get("found")
+    web_state["running"] = False
+
+
+@app.route("/web/start", methods=["POST"])
+def web_start():
+    if web_state["running"]:
+        return jsonify({"error": "Attack already running"}), 400
+    data     = request.form
+    url      = data.get("url", "http://172.22.229.213:8888/login.php")
+    username = data.get("username", "admin")
+    wordlist = data.get("wordlist", "/home/kali/wordlist.txt")
+    timeout  = int(data.get("timeout", 5))
+    t = threading.Thread(
+        target=run_web_thread,
+        args=(url, username, wordlist, timeout),
+        daemon=True
+    )
+    t.start()
+    return jsonify({"status": "started"})
+
+
+@app.route("/web/stop", methods=["POST"])
+def web_stop():
+    web_stop_event.set()
+    return jsonify({"status": "stopping"})
+
+
+@app.route("/web/stream")
+def web_stream():
+    def event_generator():
+        while True:
+            try:
+                msg = web_queue.get(timeout=30)
+                yield f"data: {msg}\n\n"
+                if msg == "DONE":
+                    break
+            except queue.Empty:
+                yield "data: PING\n\n"
+    return Response(event_generator(), mimetype="text/event-stream")
+
+
+@app.route("/web/status")
+def web_status():
+    return jsonify({
+        "running":  web_state["running"],
+        "found":    web_state["found"],
+        "progress": web_state["progress"],
+        "total":    web_state["total"],
     })
 
 

@@ -14,9 +14,10 @@
 3. [Cryptography Module](#3-cryptography-module)
 4. [Attacker Side — SSH Brute Force](#4-attacker-side--ssh-brute-force)
 5. [Port Scanner](#5-port-scanner)
-6. [Defender Side — SOC and IDS](#6-defender-side--soc-and-ids)
-7. [Integration and Testing](#7-integration-and-testing)
-8. [Conclusion and Recommendations](#8-conclusion-and-recommendations)
+6. [Web Login Brute Force](#6-web-login-brute-force)
+7. [Defender Side — SOC and IDS](#7-defender-side--soc-and-ids)
+8. [Integration and Testing](#8-integration-and-testing)
+9. [Conclusion and Recommendations](#9-conclusion-and-recommendations)
 
 ---
 
@@ -37,8 +38,9 @@ The simulation covers two sides:
 | --- | --- | --- |
 | SSH Brute Force | Systematic password guessing via paramiko | T1110.001 |
 | Port Scanning | TCP Connect scan across all 65,535 ports | T1046 |
+| Web Login Brute Force | HTTP POST form attacks via requests library | T1110.001 |
 
-Both attacks represent the reconnaissance and initial access phases of a real attack — and are easily detectable by a SIEM.
+These attacks represent the reconnaissance and initial access phases of a real attack — and are all detectable by a SIEM.
 
 ### 1.3 Ethical Disclaimer
 
@@ -319,7 +321,128 @@ Service banners reveal software names, versions, and OS details — useful for t
 
 ---
 
-## 6. Defender Side — SOC and IDS
+## 6. Web Login Brute Force
+
+### 6.1 What Is Web Login Brute Force?
+
+Web login brute force targets the application layer instead of the network protocol layer. Rather than speaking SSH directly, the attacker submits HTTP POST requests to a login form — exactly as a browser would — and detects success by the server's response code.
+
+This maps to **MITRE ATT&CK T1110.001 — Brute Force: Password Guessing**.
+
+### 6.2 Target Setup — PHP Login Page on Apache
+
+A simple vulnerable login page was deployed on Ubuntu using PHP and Apache:
+
+```text
+Stack:  Apache 2 + PHP 8.1
+Port:   8888 (port 80 occupied by Wazuh)
+URL:    http://172.22.229.213:8888/login.php
+Creds:  admin / 123123
+```
+
+The login page returns:
+
+- `200 OK` with "Invalid credentials" text on failure
+- `302 Redirect` to `/dashboard.php` on success
+
+### 6.3 How the Attack Works
+
+```text
+Kali → POST /login.php {username=admin, password=123456} → Ubuntu:8888
+       ← 200 OK "Invalid credentials"   (failed)
+Kali → POST /login.php {username=admin, password=password} → Ubuntu:8888
+       ← 200 OK "Invalid credentials"   (failed)
+...
+Kali → POST /login.php {username=admin, password=123123} → Ubuntu:8888
+       ← 302 Found → /dashboard.php     (SUCCESS)
+```
+
+The key implementation detail is `allow_redirects=False` in the requests call. Without it, both success and failure return `200 OK` (after following the redirect) and are indistinguishable:
+
+```python
+resp = requests.post(url, data={"username": u, "password": p}, allow_redirects=False)
+if resp.status_code in (301, 302):
+    return True   # redirected = login succeeded
+if "Invalid credentials" in resp.text:
+    return False  # error text = login failed
+```
+
+### 6.4 Key Difference vs SSH Brute Force
+
+| | SSH Brute Force | Web Brute Force |
+| --- | --- | --- |
+| Protocol | TCP + SSH | HTTP POST |
+| Library | paramiko | requests |
+| Success indicator | No exception raised | 302 redirect |
+| Failure indicator | AuthenticationException | 200 + error text |
+| Logged in | /var/log/auth.log | /var/log/apache2/access.log |
+| User-Agent visible | No | Yes — `python-requests/2.34.2` |
+
+The User-Agent `python-requests/2.34.2` is a detection signal — a real attacker would spoof this to look like a normal browser.
+
+### 6.5 Scan Results
+
+```text
+Target:   http://172.22.229.213:8888/login.php
+Username: admin
+Wordlist: 21 passwords
+Duration: ~1 second (HTTP is faster than SSH handshake)
+
+FAILED [001] — 123456
+FAILED [002] — password
+...
+FAILED [020] — shadow
+SUCCESS [021] — 123123
+```
+
+### 6.6 Wazuh Detection — Custom Rules
+
+Apache logs are not monitored by Wazuh by default. Two changes were made on Ubuntu:
+
+**1. Added Apache log to ossec.conf:**
+
+```xml
+<localfile>
+  <log_format>apache</log_format>
+  <location>/var/log/apache2/access.log</location>
+</localfile>
+```
+
+**2. Written custom rules in local_rules.xml:**
+
+```xml
+<rule id="100002" level="3">
+  <if_sid>31108</if_sid>
+  <url>/login.php</url>
+  <description>Web login page request detected</description>
+</rule>
+
+<rule id="100003" level="10" frequency="5" timeframe="30">
+  <if_matched_sid>100002</if_matched_sid>
+  <same_srcip />
+  <description>Web brute force — multiple login attempts from same IP</description>
+  <mitre>
+    <id>T1110.001</id>
+  </mitre>
+</rule>
+```
+
+Rule 100002 fires on every POST to `/login.php`. Rule 100003 fires at **level 10** after 5 hits from the same IP in 30 seconds — our 21-attempt attack triggers it four times.
+
+### 6.7 Evidence from Apache Access Log
+
+```text
+172.22.225.120 - [21/Jun/2026:12:25:22] "POST /login.php HTTP/1.1" 200 664 "python-requests/2.34.2"
+172.22.225.120 - [21/Jun/2026:12:25:22] "POST /login.php HTTP/1.1" 200 664 "python-requests/2.34.2"
+...
+172.22.225.120 - [21/Jun/2026:12:25:22] "POST /login.php HTTP/1.1" 302 400 "python-requests/2.34.2"
+```
+
+21 POST requests from `172.22.225.120`, all within 1 second, ending with a `302` — the fingerprint of a successful web brute force.
+
+---
+
+## 7. Defender Side — SOC and IDS
 
 ### 6.1 Wazuh Overview
 
@@ -372,7 +495,7 @@ Ubuntu logged all 20 failed attempts and the final successful login from Kali's 
 
 ---
 
-## 7. Integration and Testing
+## 8. Integration and Testing
 
 ### 7.1 Full SSH Brute Force Flow
 
@@ -423,16 +546,17 @@ Ubuntu logged all 20 failed attempts and the final successful login from Kali's 
 
 ---
 
-## 8. Conclusion and Recommendations
+## 9. Conclusion and Recommendations
 
 ### 8.1 Conclusion
 
 This project successfully simulated a complete attack cycle — reconnaissance through initial access — in a controlled environment:
 
 - The **port scanner** demonstrated how attackers map a target's attack surface before striking, discovering 9 open ports and service version details across 65,535 ports in under 3 minutes
-- The **SSH brute force** demonstrated how an automated Python script combined with a professional GUI can systematically crack weak passwords
+- The **SSH brute force** demonstrated how an automated Python script combined with a professional GUI can systematically crack weak passwords over the SSH protocol
+- The **web login brute force** demonstrated the same concept at the application layer — cracking an HTTP login form in under 1 second using Python's requests library
 - The **cryptography module** proved that algorithm choice is critical — bcrypt is 127,330x slower than MD5 per attempt
-- The **defender side** showed how a real SIEM (Wazuh) detects, categorizes, and logs both attacks in real time using the MITRE ATT&CK framework
+- The **defender side** showed how a real SIEM (Wazuh) detects all three attacks — including a custom rule written from scratch to detect web brute force — and maps them to MITRE ATT&CK in real time
 
 ### 8.2 Defense Recommendations
 

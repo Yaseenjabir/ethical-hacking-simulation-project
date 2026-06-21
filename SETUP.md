@@ -94,7 +94,7 @@ sudo systemctl status wazuh-dashboard
 
 Access the Wazuh dashboard from your Windows browser:
 
-```
+```text
 https://<ubuntu-ip>
 Username: admin
 Password: admin
@@ -110,7 +110,7 @@ Go to kali.org/get-kali → Virtual Machines → Hyper-V → Download the `.zip`
 
 Extract it to a **local path** (not OneDrive or network drive):
 
-```
+```text
 C:\VMs\kali-attacker\
 ```
 
@@ -148,7 +148,7 @@ vmconnect localhost "kali-linux-<version>"
 
 Default credentials:
 
-```
+```text
 Username: kali
 Password: kali
 ```
@@ -213,7 +213,132 @@ scp "attacker/templates/index.html" kali@<kali-ip>:~/attacker/templates/index.ht
 
 ---
 
-## Step 9 — Add Target Password to Wordlist
+## Step 9 — Set Up PHP Vulnerable Login Page on Ubuntu
+
+Install Apache and PHP:
+
+```bash
+sudo apt install apache2 php libapache2-mod-php -y
+```
+
+Change Apache port to 8888 (port 80 is used by Wazuh):
+
+```bash
+sudo nano /etc/apache2/ports.conf
+# Change: Listen 80 → Listen 8888
+
+sudo nano /etc/apache2/sites-available/000-default.conf
+# Change: <VirtualHost *:80> → <VirtualHost *:8888>
+```
+
+Create the login page:
+
+```bash
+sudo nano /var/www/html/login.php
+```
+
+```php
+<?php
+session_start();
+$valid_user = 'admin';
+$valid_pass = '123123';
+$error = '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $user = $_POST['username'] ?? '';
+    $pass = $_POST['password'] ?? '';
+    if ($user === $valid_user && $pass === $valid_pass) {
+        $_SESSION['logged_in'] = true;
+        header('Location: /dashboard.php');
+        exit;
+    } else {
+        $error = 'Invalid credentials';
+    }
+}
+?>
+<!DOCTYPE html>
+<html><head><title>Admin Login</title></head>
+<body>
+  <h2>Admin Panel Login</h2>
+  <?php if ($error): ?><p style="color:red;"><?= $error ?></p><?php endif; ?>
+  <form method="POST">
+    <input type="text" name="username" placeholder="Username" /><br><br>
+    <input type="password" name="password" placeholder="Password" /><br><br>
+    <button type="submit">Login</button>
+  </form>
+</body></html>
+```
+
+Create the dashboard page:
+
+```bash
+sudo nano /var/www/html/dashboard.php
+```
+
+```php
+<?php
+session_start();
+if (!isset($_SESSION['logged_in'])) { header('Location: /login.php'); exit; }
+?>
+<html><body><h2>Welcome, Admin. You are logged in.</h2></body></html>
+```
+
+Start Apache:
+
+```bash
+sudo systemctl start apache2
+sudo systemctl enable apache2
+```
+
+Add Apache log monitoring to Wazuh:
+
+```bash
+sudo nano /var/ossec/etc/ossec.conf
+```
+
+Add before `</ossec_config>`:
+
+```xml
+<localfile>
+  <log_format>apache</log_format>
+  <location>/var/log/apache2/access.log</location>
+</localfile>
+```
+
+Add custom detection rules:
+
+```bash
+sudo nano /var/ossec/etc/rules/local_rules.xml
+```
+
+Add inside the file (after existing rules):
+
+```xml
+<group name="web,apache,brute_force,">
+  <rule id="100002" level="3">
+    <if_sid>31108</if_sid>
+    <url>/login.php</url>
+    <description>Web login page request detected</description>
+  </rule>
+  <rule id="100003" level="10" frequency="5" timeframe="30">
+    <if_matched_sid>100002</if_matched_sid>
+    <same_srcip />
+    <description>Web brute force — multiple login attempts from same IP</description>
+    <mitre><id>T1110.001</id></mitre>
+  </rule>
+</group>
+```
+
+Restart Wazuh:
+
+```bash
+sudo systemctl restart wazuh-manager
+```
+
+Verify login page is accessible: `http://<ubuntu-ip>:8888/login.php`
+
+---
+
+## Step 10 — Add Target Password to Wordlist
 
 On Ubuntu, set a password that exists in the wordlist:
 
@@ -261,13 +386,13 @@ The dashboard has two tabs:
 
 While the attack runs, open the Wazuh dashboard:
 
-```
+```text
 https://<ubuntu-ip>
 ```
 
 Navigate to:
 
-```
+```text
 Threat Intelligence → Threat Hunting → Events
 Add column: data.srcip
 ```
@@ -278,7 +403,7 @@ You will see real-time SSH authentication failure alerts from the attacker IP.
 
 ## Project Structure
 
-```
+```text
 cybersecurity/
 ├── attacker/
 │   ├── app.py                        # Flask attacker GUI

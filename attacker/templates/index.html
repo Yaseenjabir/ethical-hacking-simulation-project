@@ -179,7 +179,8 @@
 <!-- Tabs -->
 <div style="margin-bottom: 20px;">
   <button class="tab-btn active" onclick="showTab('brute')">▶ SSH BRUTE FORCE</button>
-  <button class="tab-btn" onclick="showTab('scan')" style="margin-left:10px;">▶ PORT SCANNER</button>
+  <button class="tab-btn" onclick="showTab('scan')"  style="margin-left:10px;">▶ PORT SCANNER</button>
+  <button class="tab-btn" onclick="showTab('web')"   style="margin-left:10px;">▶ WEB BRUTE FORCE</button>
 </div>
 
 <!-- Brute Force Tab -->
@@ -223,6 +224,40 @@
     </div>
   </div>
 
+</div>
+
+<!-- Web Brute Force Tab -->
+<div id="tab-web" class="layout" style="display:none;">
+
+  <!-- Left Panel -->
+  <div class="panel">
+    <h2>// WEB ATTACK CONFIGURATION</h2>
+
+    <label>TARGET URL</label>
+    <input id="web-url" type="text" value="http://172.22.229.213:8888/login.php" />
+
+    <label>USERNAME</label>
+    <input id="web-username" type="text" value="admin" />
+
+    <label>WORDLIST PATH</label>
+    <input id="web-wordlist" type="text" value="/home/kali/wordlist.txt" />
+
+    <label>TIMEOUT (seconds)</label>
+    <input id="web-timeout" type="text" value="5" />
+
+    <button class="btn" id="btn-web-start" onclick="startWebAttack()" style="background:#00ff41;color:#0d0d0d;">▶ START ATTACK</button>
+    <button class="btn" id="btn-web-stop"  onclick="stopWebAttack()"  style="background:#ff4141;color:#fff;margin-top:8px;" disabled>■ STOP</button>
+  </div>
+
+  <!-- Right Panel -->
+  <div class="panel">
+    <h2>// LIVE ATTACK LOG</h2>
+    <div id="web-status-badge" style="display:inline-block;padding:4px 12px;border-radius:20px;font-size:11px;letter-spacing:1px;margin-bottom:14px;background:#1a1a1a;border:1px solid #00ff4155;color:#00ff4188;">IDLE</div>
+    <div id="web-log-box" style="background:#0a0a0a;border:1px solid #00ff4133;border-radius:4px;height:340px;overflow-y:auto;padding:12px;font-size:12px;line-height:1.7;"></div>
+    <div id="web-result-box" style="margin-top:16px;padding:14px;border-radius:6px;display:none;background:#00ff4111;border:1px solid #00ff41;font-size:14px;letter-spacing:1px;">
+      PASSWORD CRACKED &nbsp;►&nbsp; <span id="web-result-password" style="color:#fff;font-weight:bold;"></span>
+    </div>
+  </div>
 </div>
 
 <!-- Port Scanner Tab -->
@@ -270,6 +305,7 @@
   function showTab(name) {
     document.getElementById("tab-brute").style.display = name === "brute" ? "grid" : "none";
     document.getElementById("tab-scan").style.display  = name === "scan"  ? "grid" : "none";
+    document.getElementById("tab-web").style.display   = name === "web"   ? "grid" : "none";
     document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
     event.target.classList.add("active");
   }
@@ -350,6 +386,76 @@
         tbody.appendChild(tr);
       });
     });
+  }
+
+  // Web Brute Force
+  let webSource = null;
+
+  function startWebAttack() {
+    const data = new FormData();
+    data.append("url",      document.getElementById("web-url").value);
+    data.append("username", document.getElementById("web-username").value);
+    data.append("wordlist", document.getElementById("web-wordlist").value);
+    data.append("timeout",  document.getElementById("web-timeout").value);
+
+    fetch("/web/start", { method: "POST", body: data })
+      .then(r => r.json())
+      .then(res => {
+        if (res.error) { alert(res.error); return; }
+        document.getElementById("web-log-box").innerHTML = "";
+        document.getElementById("web-result-box").style.display = "none";
+        document.getElementById("btn-web-start").disabled = true;
+        document.getElementById("btn-web-stop").disabled  = false;
+        document.getElementById("web-status-badge").textContent = "RUNNING";
+        document.getElementById("web-status-badge").style.color = "#ffaa00";
+        listenWebStream();
+      });
+  }
+
+  function stopWebAttack() {
+    fetch("/web/stop", { method: "POST" });
+  }
+
+  function listenWebStream() {
+    if (webSource) webSource.close();
+    webSource = new EventSource("/web/stream");
+
+    webSource.onmessage = function(e) {
+      const msg = e.data;
+      if (msg === "PING") return;
+
+      if (msg === "DONE") {
+        webSource.close();
+        document.getElementById("btn-web-start").disabled = false;
+        document.getElementById("btn-web-stop").disabled  = true;
+        fetch("/web/status").then(r => r.json()).then(s => {
+          if (s.found) {
+            document.getElementById("web-status-badge").textContent = "PASSWORD FOUND";
+            document.getElementById("web-status-badge").style.color = "#00ff41";
+            document.getElementById("web-result-password").textContent = s.found;
+            document.getElementById("web-result-box").style.display = "block";
+          } else {
+            document.getElementById("web-status-badge").textContent = "STOPPED";
+            document.getElementById("web-status-badge").style.color = "#ff4141";
+          }
+        });
+        return;
+      }
+
+      const div = document.createElement("div");
+      if (msg.startsWith("SUCCESS")) {
+        div.style.color = "#00ff41";
+        div.style.fontWeight = "bold";
+      } else if (msg.startsWith("FAILED")) {
+        div.style.color = "#ff6b6b";
+      } else {
+        div.style.color = "#aaaaaa";
+      }
+      div.textContent = msg;
+      const box = document.getElementById("web-log-box");
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+    };
   }
 
   let eventSource = null;
