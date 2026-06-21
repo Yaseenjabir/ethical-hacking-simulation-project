@@ -231,7 +231,15 @@ sudo nano /etc/apache2/sites-available/000-default.conf
 # Change: <VirtualHost *:80> → <VirtualHost *:8888>
 ```
 
-Create the login page:
+Copy the PHP files from the repo to Apache's web root:
+
+```bash
+sudo cp victim-webapp/login_basic.php /var/www/html/login.php
+sudo cp victim-webapp/dashboard.php   /var/www/html/dashboard.php
+sudo cp victim-webapp/search.php      /var/www/html/search.php
+```
+
+Or create manually:
 
 ```bash
 sudo nano /var/www/html/login.php
@@ -405,6 +413,11 @@ You will see real-time SSH authentication failure alerts from the attacker IP.
 
 ```text
 cybersecurity/
+├── victim-webapp/
+│   ├── login_basic.php               # Hardcoded login — used for web brute force
+│   ├── login_sqli.php                # MySQL login — vulnerable to SQL injection
+│   ├── search.php                    # Vulnerable search page — UNION extraction
+│   └── dashboard.php                 # Protected page shown after login
 ├── attacker/
 │   ├── app.py                        # Flask attacker GUI
 │   ├── port_scanner.py               # Port scanner module
